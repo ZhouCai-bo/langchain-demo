@@ -19,7 +19,7 @@ langchain
 langchain_wenxin
 langchain_community
 tiktoken
-docarrat
+docarray
 pandas
 langsmith
 pyarrow
