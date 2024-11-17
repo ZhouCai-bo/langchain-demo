@@ -15,9 +15,9 @@ uwsgi==2.0.24
 streamlit==1.40.0
 chromadb==0.5.3
 qianfan
-langchain
-langchain_wenxin
-langchain_community
+langchain==0.3.7
+langchain_wenxin==0.9.0
+langchain_community==0.3.7
 tiktoken
 docarray
 pandas
