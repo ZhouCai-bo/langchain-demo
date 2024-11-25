@@ -2,76 +2,48 @@ import logging
 import time
 
 import streamlit as st
-from langchain.memory import ConversationBufferMemory, ConversationBufferWindowMemory
-from langchain.chains import ConversationChain
-from langchain.chat_models import QianfanChatEndpoint
-from langchain_core.messages.ai import AIMessage, AIMessageChunk
-from langchain_core.messages.human import HumanMessage, HumanMessageChunk
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+
+from src.llm.chatbot import app
 
 
-st.title("Chat with LLMs Models")  # Set the title of the Streamlit app
+st.title("Talk To Me")
 
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
-def stream_chat(model, messages, ak, sk):
-    ak = 'MSh0vo1NQTErNMBGlcnODVvi'
-    sk = '3Yhn7t0JZmUj6Zf2S0g4veuPARevlCOv'
-    print('messages')
-    # for msg in messages:
-    #     print(msg)
-    # try:
-    #     llm = QianfanChatEndpoint(tampreture=0.1, timeout=10, api_key=ak, secret_key=sk) 
-    #     memory = ConversationBufferMemory()
-    #     original_chain = ConversationChain(
-    #         llm=llm,
-    #         verbose=True,
-    #         memory=memory,
-    #     )
-    #     resp = original_chain.run(messages[-1]['content'])
-    #     print(memory.load_memory_variables({}))
-    #     return resp
-    # except Exception as e:
-    #     # Log and re-raise any errors that occur
-    #     logging.error(f"Error during streaming: {str(e)}")
-    #     raise e
+def convert_messsages(messages: list[dict]):
+    result = []
+    for msg in messages:
+        if msg['role'] == 'user':
+            result.append(HumanMessage(content=msg['content']))
+        elif msg['role'] == 'assistant':
+            result.append(AIMessage(content=msg['content']))
+    return result
 
-    # sequence = []
-    # for msg in messages:
-    #     if msg["role"] == "user":
-    #         sequence.append(HumanMessage(msg['content']))
-    #     else:
-    #         sequence.append(AIMessage(msg['content']))
+def chat(messages: list[dict], language: str):
+    print('messages')
 
     try:
-        llm = QianfanChatEndpoint(tampreture=0.1, timeout=10, api_key=ak, secret_key=sk) 
-        memory = ConversationBufferWindowMemory(k=5)
-        for i in range(0, len(messages) - 2, 2):
-            memory.save_context({'Human': messages[i]['content']}, {'AI': messages[i+1]['content']})
-
-        original_chain = ConversationChain(
-            llm=llm,
-            verbose=True,
-            memory=memory,
+        model_messages = convert_messsages(messages)
+        config = {'Configurable': {'thread_id': '001'}}
+        result = app.invoke(
+            {'messages': model_messages, 'language': language},
+            config,
         )
-        resp = original_chain.run(messages[-1]['content'])
-        print(memory.load_memory_variables({}))
-        return resp
+        print(result)
+        return result['messages'][-1]
+
     except Exception as e:
-        # Log and re-raise any errors that occur
         logging.error(f"Error during streaming: {str(e)}")
         raise e
 
 
 def draw():
-    #defining side bar
-    st.sidebar.header("Filters:")
+    st.sidebar.header("配置:")
 
-    ak = st.sidebar.text_input(label='千帆AK：')
-    sk = st.sidebar.text_input(label='千帆SK：', type="password")
-
-    # Sidebar for model selection
-    model = st.sidebar.selectbox("Choose a model", ["百度千帆"])
+    model = st.sidebar.selectbox("选择模型：", ["百度千帆"])
+    language = st.sidebar.selectbox("选择语言：", ["汉语", "英语", "西班牙语", "德语", "法语"])
 
     # Prompt for user input and save to chat history
     if prompt := st.chat_input("Your question"):
@@ -94,7 +66,7 @@ def draw():
                         # Prepare messages for the LLM and stream the response
                         # messages = [ChatMessage(role=msg["role"], content=msg["content"]) for msg in st.session_state.messages]
                         messages = st.session_state.messages
-                        response_message = stream_chat(model, messages, ak, sk)
+                        response_message = chat(messages, language)
                         duration = time.time() - start_time  # Calculate the duration
                         # response_message_with_duration = f"{response_message}\n\nDuration: {duration:.2f} seconds"
                         st.session_state.messages.append({"role": "assistant", "content": response_message, 'duration': f'{duration:.2f} seconds'})
