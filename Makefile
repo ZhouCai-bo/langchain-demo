@@ -10,7 +10,7 @@ install:
 	mkdir -p $(PROJECT_HOME)/var/log; \
 	if [ ! -d $(VENV_HOME) ]; \
 	then \
-		/usr/bin/python3.11 -m venv $(VENV_HOME); \
+		/Users/zhoucaibo/.pyenv/versions/3.11.0/bin/python -m venv $(VENV_HOME); \
 		$(VENV_HOME)/bin/pip install -U distribute; \
 		$(VENV_HOME)/bin/pip install -U uwsgi==2.0.24; \
 	fi

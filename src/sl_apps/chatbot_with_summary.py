@@ -1,16 +1,15 @@
 import logging
 import time
-from typing import Sequence
+from typing import Sequence, Literal
 from typing_extensions import Annotated, TypedDict
 
 import streamlit as st
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, RemoveMessage
 from langchain.chat_models import QianfanChatEndpoint
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import START, MessagesState, StateGraph, add_messages
+from langgraph.graph import START, MessagesState, StateGraph, add_messages, END
 # from langgraph.graph.message import add_messages
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, trim_messages
 
 
 ak = 'MSh0vo1NQTErNMBGlcnODVvi'
@@ -22,69 +21,100 @@ class State(TypedDict):
     language: str
     summary: str
 
+
 model = QianfanChatEndpoint(tampreture=0.1, timeout=10, api_key=ak, secret_key=sk) 
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            'system',
-            '你是一位专家助手，请使用{language}，尽可能的回答问题。'
-        ),
-        MessagesPlaceholder(variable_name='messages'),
-    ]
-)
 
-workflow = StateGraph(state_schema=State)
-
-trimmer = trim_messages(
-    max_tokens=150,
-    strategy='last',
-    token_counter=model,
-    include_system=True,
-    allow_partial=False,
-    start_on='human',
-)
-
-def call_model(state: State, messages: list[BaseMessage]=None):
-    print('State before call')
-    print(len(state['messages']) ,' messgaes in state')
-    chain = prompt | model
-    if not messages:
-        trimmed_messages = trimmer.invoke(state['messages'])
-        print(111)
+def call_model(state: State):
+    summary = state.get("summary", "")
+    if summary:
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    'system',
+                    '你是一位情感专家，善于帮助人们解决生活中遇到的情感问题，请使用{language}开展对话。\n注意要站在对方的角度，不要回答一些空话和大话，尝试提供一些安慰。先前的对话是:{summary}'
+                ),
+                MessagesPlaceholder(variable_name='messages'),
+            ]
+        )
     else:
-        trimmed_messages = trimmer.invoke(messages)
-        print(222)
-    print('trimmed message')
-    print(trimmed_messages)
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    'system',
+                    '你是一位情感专家，善于帮助人们解决生活中遇到的情感问题，请使用{language}开展对话。\n注意要站在对方的角度，不要回答一些空话和大话，尝试提供一些安慰。'
+                ),
+                MessagesPlaceholder(variable_name='messages'),
+            ]
+        )
+
+    prompt_as_string = prompt.format(
+        messages=state['messages'],
+        language=state['language'],
+        summary=state.get('summary', ''),
+    )
+    print('prompt')
+    print(prompt_as_string)
+
+    chain = prompt | model
     response = chain.invoke({
-        'messages': trimmed_messages,
-        'language': state['language']
+        'messages': state['messages'],
+        'language': state['language'],
+        'summary': state.get('summary', '')
     })
-    print('State after call')
-    print(len(state['messages']) ,' messgaes in state')
-    return {'messages': [response]}
+    return {"messages": [response]}
 
 
-workflow.add_edge(START, 'model')
-workflow.add_node('model', call_model)
+def should_continue(state: State) -> Literal["summarize_conversation", END]:
+    """Return the next node to execute."""
+    messages = state["messages"]
+    if len(messages) > 6:
+        return "summarize_conversation"
 
+    return END
+
+
+def summarize_conversation(state: State):
+    # First, we summarize the conversation
+    summary = state.get("summary", "")
+    if summary:
+        # If a summary already exists, we use a different system prompt
+        # to summarize it than if one didn't
+        summary_message = (
+            f"当前对话的总结是: {summary}\n\n"
+            "使用如下消息，扩展上述的对话总结："
+        )
+    else:
+        summary_message = "生成对上述对话的总结："
+
+    messages = state["messages"] + [HumanMessage(content=summary_message)]
+    response = model.invoke(messages)
+    # 保留最新的一组对话，其余的从列表删除
+    delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][:-2]]
+    return {"summary": response.content, "messages": delete_messages}
+
+
+workflow = StateGraph(State)
+
+workflow.add_node("conversation", call_model)
+workflow.add_node(summarize_conversation)
+
+workflow.add_edge(START, "conversation")
+# We now add a conditional edge
+workflow.add_conditional_edges(
+    # First, we define the start node. We use `conversation`.
+    # This means these are the edges taken after the `conversation` node is called.
+    "conversation",
+    # Next, we pass in the function that will determine which node is called next.
+    should_continue,
+)
+
+# We now add a normal edge from `summarize_conversation` to END.
+# This means that after `summarize_conversation` is called, we end.
+workflow.add_edge("summarize_conversation", END)
+
+# Finally, we compile it!
 memory = MemorySaver()
 app = workflow.compile(checkpointer=memory)
-
-
-def trim_messages(messages: list[BaseMessage]):
-    return trimmer.invoke(messages)
-
-def summary_messages(state: State):
-    summary = state.get('summary', '')
-    if summary:
-        summary_message = f'这是一段对话的总结：{summary}\n\n，使用下面的消息扩充这一份总结:'
-    else:
-        summary_message = '总结下面的对话:'
-
-    messages = state['message'] + [HumanMessage(content=summary_message)]
-    response = model.invoke(messages)
-    delete_messages
 
 def convert_messsages(messages: list[dict]):
     result = []
@@ -121,7 +151,7 @@ def draw():
     st.sidebar.header("配置:")
 
     model = st.sidebar.selectbox("选择模型：", ["百度千帆"])
-    language = st.sidebar.selectbox("选择语言：", ["汉语", "英语", "西班牙语", "德语", "法语"])
+    language = st.sidebar.selectbox("选择语言：", ["汉语", "英语"])
 
     # Prompt for user input and save to chat history
     if prompt := st.chat_input("Your question"):
